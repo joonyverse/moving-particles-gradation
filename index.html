@@ -50,7 +50,7 @@
         /* 컨트롤 패널 스타일 */
         #controls {
             position: absolute;
-            top: 70px; /* 버튼 아래로 위치 조정 */
+            top: 70px;
             left: 20px;
             background: rgba(255, 255, 255, 0.85);
             color: #333;
@@ -63,11 +63,27 @@
             gap: 15px;
             backdrop-filter: blur(10px);
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            min-width: 250px;
+            min-width: 280px;
+            
+            /* 스크롤 추가 */
+            max-height: calc(100vh - 100px); 
+            overflow-y: auto;
+            
             transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
         }
 
-        /* 숨김 상태 클래스 */
+        /* 패널 스크롤바 디자인 */
+        #controls::-webkit-scrollbar {
+            width: 6px;
+        }
+        #controls::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #controls::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
         #controls.hidden {
             opacity: 0;
             transform: translateY(-10px);
@@ -121,14 +137,26 @@
             border: none;
             border-radius: 15px;
         }
+        
+        .action-btn {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 12px;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        .action-btn:hover {
+            background: #f0f0f0;
+        }
     </style>
 </head>
 <body>
 
-<!-- 설정 토글 버튼 -->
 <button id="toggle-btn" class="toggle-btn">⚙️ 설정 숨기기</button>
 
-<!-- 컨트롤 패널 UI -->
 <div id="controls">
     <div class="control-group">
         <label>파티클 개수 <span id="val-particles">15</span></label>
@@ -150,6 +178,10 @@
         <label>해상도 배율 <span id="val-resolution"></span></label>
         <input type="range" id="inp-resolution" min="1" max="4" step="0.5" value="2">
     </div>
+    <div class="control-group" style="flex-direction: row; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.05); padding: 10px; border-radius: 8px;">
+        <label style="margin:0; cursor:pointer;" for="inp-editMode">🛠 편집 모드 (드래그)</label>
+        <input type="checkbox" id="inp-editMode" style="width: 20px; height: 20px; cursor: pointer;">
+    </div>
     <div class="control-group">
         <label>합성 모드 (Blend Mode)</label>
         <select id="inp-blend">
@@ -161,26 +193,45 @@
         </select>
     </div>
     <div class="control-group">
-        <label>색상 팔레트</label>
+        <label>전체 색상 팔레트</label>
         <div class="colors-container" id="colors-container">
             <!-- JS에서 동적 생성 -->
+        </div>
+    </div>
+    
+    <!-- 개별 파티클 조절 패널 -->
+    <div class="control-group" id="selected-panel" style="display: none; background: rgba(45, 74, 227, 0.1); padding: 15px; border-radius: 8px; margin-top: 5px; border: 1px solid rgba(45, 74, 227, 0.2);">
+        <label style="color: #2d4ae3; margin-bottom: 5px;">🎯 선택된 파티클</label>
+        <div class="control-group">
+            <label>크기 (마우스 휠) <span id="val-sel-radius">-</span></label>
+            <input type="range" id="inp-sel-radius" min="50" max="2500" value="400">
+        </div>
+        <div class="control-group" style="margin-top: 5px; flex-direction: row; align-items: center; justify-content: space-between;">
+            <label style="margin:0;">개별 색상</label>
+            <input type="color" id="inp-sel-color">
+        </div>
+        <!-- 우선순위 조절 버튼 4개 추가 (Grid 레이아웃) -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
+            <button id="btn-forward-one" class="action-btn">🔼 한 칸 앞으로</button>
+            <button id="btn-bring-front" class="action-btn">⏫ 맨 앞으로</button>
+            <button id="btn-backward-one" class="action-btn">🔽 한 칸 뒤로</button>
+            <button id="btn-send-back" class="action-btn">⏬ 맨 뒤로</button>
         </div>
     </div>
 </div>
 
 <script>
-    // UI 연동을 위한 전역 상태 객체
     const config = {
         particles: 15,
         speed: 1.0,
         minRadius: 400,
         maxRadius: 900,
-        resolution: window.devicePixelRatio ? Math.max(2, window.devicePixelRatio) : 2, // 기본적으로 기기 해상도에 맞추되 최소 2배율 적용
+        resolution: window.devicePixelRatio ? Math.max(2, window.devicePixelRatio) : 2,
         blendMode: 'saturation',
-        colors: ['#2d4ae3', '#faff59', '#ff68f8', '#2cd1fc', '#36e954']
+        colors: ['#2d4ae3', '#faff59', '#ff68f8', '#2cd1fc', '#36e954'],
+        isEditMode: false
     };
 
-    // HEX 색상을 RGB 객체로 변환
     function hexToRgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         return result ? {
@@ -190,233 +241,418 @@
         } : {r: 0, g: 0, b: 0};
     }
 
+    function rgbToHex(r, g, b) {
+        return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1);
+    }
+
     const PI2 = Math.PI * 2;
 
-    // 2. 개별 파티클(원)을 정의하는 클래스
     class GlowParticle {
         constructor(x, y, radius, rgb) {
             this.x = x;
             this.y = y;
             this.radius = radius;
             this.rgb = rgb;
-
-            // 이동 속도 (랜덤하게 지정)
             this.vx = Math.random() * 4;
             this.vy = Math.random() * 4;
-
-            // 방향을 랜덤하게 반전 (- 방향으로도 움직이게)
-        if (Math.random() > 0.5) this.vx *= -1;
-        if (Math.random() > 0.5) this.vy *= -1;
-    }
-
-    animate(ctx, stageWidth, stageHeight) {
-        // 위치 업데이트 (설정된 속도 배율 반영)
-        this.x += this.vx * config.speed;
-        this.y += this.vy * config.speed;
-
-        // 화면 가로 끝에 닿으면 방향 반전 (튕기기 효과)
-        if (this.x < 0) {
-            this.vx *= -1;
-            this.x = 0;
-        } else if (this.x > stageWidth) {
-            this.vx *= -1;
-            this.x = stageWidth;
+            if (Math.random() > 0.5) this.vx *= -1;
+            if (Math.random() > 0.5) this.vy *= -1;
         }
 
-        // 화면 세로 끝에 닿으면 방향 반전
-        if (this.y < 0) {
-            this.vy *= -1;
-            this.y = 0;
-        } else if (this.y > stageHeight) {
-            this.vy *= -1;
-            this.y = stageHeight;
-        }
+        animate(ctx, stageWidth, stageHeight, isSelected = false) {
+            if (!config.isEditMode) {
+                this.x += this.vx * config.speed;
+                this.y += this.vy * config.speed;
 
-        // 캔버스에 그리기
+                if (this.x < 0) {
+                    this.vx *= -1;
+                    this.x = 0;
+                } else if (this.x > stageWidth) {
+                    this.vx *= -1;
+                    this.x = stageWidth;
+                }
+
+                if (this.y < 0) {
+                    this.vy *= -1;
+                    this.y = 0;
+                } else if (this.y > stageHeight) {
+                    this.vy *= -1;
+                    this.y = stageHeight;
+                }
+            }
+
             ctx.beginPath();
-            
-            // 방사형 그라데이션 생성 (중심에서 바깥으로 갈수록 투명해짐)
             const g = ctx.createRadialGradient(
-                this.x, this.y, this.radius * 0.01, // 중심점
-                this.x, this.y, this.radius         // 바깥점 (반지름 크기)
+                this.x, this.y, this.radius * 0.01,
+                this.x, this.y, this.radius
             );
             
-            // 중심은 불투명(1), 끝은 투명(0)으로 설정
             g.addColorStop(0, `rgba(${this.rgb.r}, ${this.rgb.g}, ${this.rgb.b}, 1)`);
             g.addColorStop(1, `rgba(${this.rgb.r}, ${this.rgb.g}, ${this.rgb.b}, 0)`);
             
             ctx.fillStyle = g;
             ctx.arc(this.x, this.y, this.radius, 0, PI2, false);
             ctx.fill();
+
+            if (config.isEditMode) {
+                ctx.beginPath();
+                if (isSelected) {
+                    ctx.strokeStyle = `rgba(255, 255, 255, 1)`;
+                    ctx.lineWidth = 4;
+                    ctx.arc(this.x, this.y, this.radius * 0.1, 0, PI2, false);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([5, 5]);
+                    ctx.arc(this.x, this.y, this.radius, 0, PI2, false);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                } else {
+                    ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+                    ctx.lineWidth = 2;
+                    ctx.arc(this.x, this.y, this.radius * 0.1, 0, PI2, false);
+                    ctx.stroke();
+                }
+            }
         }
     }
 
-    // 3. 전체 캔버스를 관리하고 애니메이션을 실행하는 앱 클래스
     class App {
         constructor() {
-            // 캔버스 생성 및 바디에 추가
             this.canvas = document.createElement('canvas');
             document.body.appendChild(this.canvas);
             this.ctx = this.canvas.getContext('2d');
 
-        // 파티클(원) 배열
-        this.particles = [];
+            this.draggingParticle = null;
+            this.selectedParticle = null;
+            this.isPointerDown = false;
 
-        // 리사이즈 이벤트 설정
-        window.addEventListener('resize', this.resize.bind(this), false);
-        this.resize();
+            this.canvas.addEventListener('mousedown', this.onDown.bind(this));
+            this.canvas.addEventListener('mousemove', this.onMove.bind(this));
+            this.canvas.addEventListener('mouseup', this.onUp.bind(this));
+            this.canvas.addEventListener('mouseleave', this.onUp.bind(this));
+            this.canvas.addEventListener('wheel', this.onWheel.bind(this), {passive: false});
 
-            // 애니메이션 루프 시작
+            this.canvas.addEventListener('touchstart', this.onDown.bind(this), {passive: false});
+            this.canvas.addEventListener('touchmove', this.onMove.bind(this), {passive: false});
+            this.canvas.addEventListener('touchend', this.onUp.bind(this));
+
+            this.pixelRatio = config.resolution;
+            this.particles = [];
+            window.addEventListener('resize', this.resize.bind(this), false);
+            this.resize();
             window.requestAnimationFrame(this.animate.bind(this));
+            
+            document.getElementById('val-resolution').textContent = config.resolution.toFixed(1);
         }
 
         resize() {
-        // 화면 크기 가져오기
-        this.stageWidth = document.body.clientWidth;
-        this.stageHeight = document.body.clientHeight;
+            this.stageWidth = document.body.clientWidth;
+            this.stageHeight = document.body.clientHeight;
+            this.pixelRatio = config.resolution;
+            this.canvas.width = this.stageWidth * this.pixelRatio;
+            this.canvas.height = this.stageHeight * this.pixelRatio;
+            this.ctx.scale(this.pixelRatio, this.pixelRatio);
+            this.createParticles();
+        }
 
-        // 해상도 배율 설정 적용
-        this.pixelRatio = config.resolution;
+        getPointerPos(e) {
+            let clientX = e.clientX;
+            let clientY = e.clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            }
+            return { x: clientX, y: clientY };
+        }
 
-        // 캔버스 크기를 화면 크기에 맞추고 픽셀 비율 적용
-        this.canvas.width = this.stageWidth * this.pixelRatio;
-        this.canvas.height = this.stageHeight * this.pixelRatio;
-        this.ctx.scale(this.pixelRatio, this.pixelRatio);
+        onDown(e) {
+            if (!config.isEditMode) return;
+            
+            // 컨트롤 패널 내부 클릭 시에는 캔버스 이벤트 무시
+            if (e.target.closest('#controls') || e.target.closest('#toggle-btn')) {
+                return;
+            }
+            
+            this.isPointerDown = true;
+            const pos = this.getPointerPos(e);
 
-        // 화면 크기가 변할 때마다 파티클을 새로 생성
-        this.createParticles();
-    }
+            let closestParticle = null;
+            let minDistance = Infinity;
 
-    createParticles() {
-        let curColor = 0;
-        this.particles = [];
-
-        for (let i = 0; i < config.particles; i++) {
-            // HEX 색상을 RGB로 변환하여 사용
-            const colorRgb = hexToRgb(config.colors[curColor]);
-
-            // 파티클 생성 (랜덤 위치, 랜덤 반지름, 순차적 색상)
-            const item = new GlowParticle(
-                Math.random() * this.stageWidth,
-                Math.random() * this.stageHeight,
-                Math.random() * (config.maxRadius - config.minRadius) + config.minRadius,
-                colorRgb
-            );
-
-            if (++curColor >= config.colors.length) {
-                curColor = 0;
+            for (let i = 0; i < this.particles.length; i++) {
+                const p = this.particles[i];
+                const dx = pos.x - p.x;
+                const dy = pos.y - p.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < p.radius && distance < minDistance) {
+                    closestParticle = p;
+                    minDistance = distance;
+                }
             }
 
-            this.particles[i] = item;
+            if (closestParticle) {
+                this.draggingParticle = closestParticle;
+                this.selectedParticle = closestParticle;
+                this.canvas.style.cursor = 'grabbing';
+            } else {
+                this.selectedParticle = null;
+            }
+            
+            if(this.onSelectedChange) this.onSelectedChange(this.selectedParticle);
+        }
+
+        onWheel(e) {
+            if (!config.isEditMode || !this.selectedParticle) return;
+            
+            // 컨트롤 패널 내부에서 휠 조작 시에는 캔버스 크기 조절 무시
+            if (e.target.closest('#controls')) {
+                return;
+            }
+
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -30 : 30;
+            this.selectedParticle.radius = Math.max(50, Math.min(2500, this.selectedParticle.radius + delta));
+            
+            // UI 업데이트
+            if(this.onSelectedChange) this.onSelectedChange(this.selectedParticle);
+        }
+
+        onMove(e) {
+            if (!config.isEditMode) {
+                this.canvas.style.cursor = 'default';
+                return;
+            }
+            
+            if (!this.draggingParticle) {
+                const pos = this.getPointerPos(e);
+                let isHover = false;
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    const dx = pos.x - p.x;
+                    const dy = pos.y - p.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < p.radius) {
+                        isHover = true;
+                        break;
+                    }
+                }
+                this.canvas.style.cursor = isHover ? 'grab' : 'crosshair';
+            }
+
+            if (this.draggingParticle && this.isPointerDown) {
+                e.preventDefault();
+                const pos = this.getPointerPos(e);
+                this.draggingParticle.x = pos.x;
+                this.draggingParticle.y = pos.y;
+            }
+        }
+
+        onUp(e) {
+            this.isPointerDown = false;
+            this.draggingParticle = null;
+            if (config.isEditMode) {
+                this.canvas.style.cursor = 'crosshair';
+            } else {
+                this.canvas.style.cursor = 'default';
+            }
+        }
+
+        createParticles() {
+            let curColor = 0;
+            this.particles = [];
+            for (let i = 0; i < config.particles; i++) {
+                const colorRgb = hexToRgb(config.colors[curColor]);
+                const item = new GlowParticle(
+                    Math.random() * this.stageWidth,
+                    Math.random() * this.stageHeight,
+                    Math.random() * (config.maxRadius - config.minRadius) + config.minRadius,
+                    colorRgb
+                );
+
+                if (++curColor >= config.colors.length) {
+                    curColor = 0;
+                }
+                this.particles[i] = item;
+            }
+        }
+
+        animate() {
+            window.requestAnimationFrame(this.animate.bind(this));
+            this.ctx.clearRect(0, 0, this.stageWidth, this.stageHeight);
+            this.ctx.globalCompositeOperation = config.blendMode;
+
+            for (let i = 0; i < config.particles; i++) {
+                const item = this.particles[i];
+                const isSelected = (item === this.selectedParticle);
+                if(item) item.animate(this.ctx, this.stageWidth, this.stageHeight, isSelected);
+            }
         }
     }
 
-    animate() {
-        window.requestAnimationFrame(this.animate.bind(this));
-
-        // 매 프레임마다 캔버스를 지워줌
-        this.ctx.clearRect(0, 0, this.stageWidth, this.stageHeight);
-
-        // UI에서 선택한 합성 모드 적용
-        this.ctx.globalCompositeOperation = config.blendMode;
-
-        // 모든 파티클의 애니메이션(이동 및 그리기) 실행
-        for (let i = 0; i < config.particles; i++) {
-            const item = this.particles[i];
-            if(item) item.animate(this.ctx, this.stageWidth, this.stageHeight);
-        }
-    }
-}
-
-// UI 컨트롤 초기화 및 이벤트 바인딩
-function initControls(app) {
-    // 토글 기능 연동
-    const toggleBtn = document.getElementById('toggle-btn');
-    const controlsPanel = document.getElementById('controls');
-    
-    toggleBtn.addEventListener('click', () => {
-        controlsPanel.classList.toggle('hidden');
-        if (controlsPanel.classList.contains('hidden')) {
-            toggleBtn.textContent = '⚙️ 설정 열기';
-        } else {
-            toggleBtn.textContent = '⚙️ 설정 숨기기';
-        }
-    });
-
-    document.getElementById('inp-particles').addEventListener('input', (e) => {
-        config.particles = parseInt(e.target.value);
-        document.getElementById('val-particles').textContent = config.particles;
-        app.createParticles(); // 파티클 개수가 변하면 재생성
-    });
-
-    document.getElementById('inp-speed').addEventListener('input', (e) => {
-        config.speed = parseFloat(e.target.value);
-        document.getElementById('val-speed').textContent = config.speed.toFixed(1);
-    });
-
-    document.getElementById('inp-minRadius').addEventListener('input', (e) => {
-        config.minRadius = parseInt(e.target.value);
-        document.getElementById('val-minRadius').textContent = config.minRadius;
+    function initControls(app) {
+        const toggleBtn = document.getElementById('toggle-btn');
+        const controlsPanel = document.getElementById('controls');
         
-        // 최솟값이 최댓값보다 커지지 않게 방어
-        if(config.minRadius > config.maxRadius) {
-            config.maxRadius = config.minRadius;
-            document.getElementById('inp-maxRadius').value = config.maxRadius;
-            document.getElementById('val-maxRadius').textContent = config.maxRadius;
-        }
-        app.createParticles();
-    });
-
-    document.getElementById('inp-maxRadius').addEventListener('input', (e) => {
-        config.maxRadius = parseInt(e.target.value);
-        document.getElementById('val-maxRadius').textContent = config.maxRadius;
-        
-        // 최댓값이 최솟값보다 작아지지 않게 방어
-        if(config.maxRadius < config.minRadius) {
-            config.minRadius = config.maxRadius;
-            document.getElementById('inp-minRadius').value = config.minRadius;
-            document.getElementById('val-minRadius').textContent = config.minRadius;
-        }
-        app.createParticles();
-    });
-
-    // 해상도 컨트롤 바인딩
-    document.getElementById('val-resolution').textContent = config.resolution.toFixed(1);
-    document.getElementById('inp-resolution').value = config.resolution;
-    document.getElementById('inp-resolution').addEventListener('input', (e) => {
-        config.resolution = parseFloat(e.target.value);
-        document.getElementById('val-resolution').textContent = config.resolution.toFixed(1);
-        app.resize(); // 해상도가 변경되면 캔버스를 다시 리사이즈하여 화질 즉시 적용
-    });
-
-    document.getElementById('inp-blend').addEventListener('change', (e) => {
-        config.blendMode = e.target.value;
-    });
-
-    // 색상 선택기 렌더링
-    const colorsContainer = document.getElementById('colors-container');
-    config.colors.forEach((color, index) => {
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.value = color;
-        input.addEventListener('input', (e) => {
-            config.colors[index] = e.target.value;
-            app.createParticles(); // 색상 변경 시 즉시 반영
+        toggleBtn.addEventListener('click', () => {
+            controlsPanel.classList.toggle('hidden');
+            if (controlsPanel.classList.contains('hidden')) {
+                toggleBtn.textContent = '⚙️ 설정 열기';
+            } else {
+                toggleBtn.textContent = '⚙️ 설정 숨기기';
+            }
         });
-        colorsContainer.appendChild(input);
-    });
-}
 
-// 창이 로드되면 앱 실행
-window.onload = () => {
-    const app = new App();
-    initControls(app);
-}
+        document.getElementById('inp-particles').addEventListener('input', (e) => {
+            config.particles = parseInt(e.target.value);
+            document.getElementById('val-particles').textContent = config.particles;
+            app.createParticles();
+        });
+
+        document.getElementById('inp-speed').addEventListener('input', (e) => {
+            config.speed = parseFloat(e.target.value);
+            document.getElementById('val-speed').textContent = config.speed.toFixed(1);
+        });
+
+        document.getElementById('inp-minRadius').addEventListener('input', (e) => {
+            config.minRadius = parseInt(e.target.value);
+            document.getElementById('val-minRadius').textContent = config.minRadius;
+            if(config.minRadius > config.maxRadius) {
+                config.maxRadius = config.minRadius;
+                document.getElementById('inp-maxRadius').value = config.maxRadius;
+                document.getElementById('val-maxRadius').textContent = config.maxRadius;
+            }
+            app.createParticles();
+        });
+
+        document.getElementById('inp-maxRadius').addEventListener('input', (e) => {
+            config.maxRadius = parseInt(e.target.value);
+            document.getElementById('val-maxRadius').textContent = config.maxRadius;
+            if(config.maxRadius < config.minRadius) {
+                config.minRadius = config.maxRadius;
+                document.getElementById('inp-minRadius').value = config.minRadius;
+                document.getElementById('val-minRadius').textContent = config.minRadius;
+            }
+            app.createParticles();
+        });
+
+        document.getElementById('inp-resolution').addEventListener('input', (e) => {
+            config.resolution = parseFloat(e.target.value);
+            document.getElementById('val-resolution').textContent = config.resolution.toFixed(1);
+            app.resize();
+        });
+
+        // 개별 파티클 패널 UI 연동
+        const selPanel = document.getElementById('selected-panel');
+        const inpSelRadius = document.getElementById('inp-sel-radius');
+        const valSelRadius = document.getElementById('val-sel-radius');
+        const inpSelColor = document.getElementById('inp-sel-color');
+
+        app.onSelectedChange = (particle) => {
+            if (particle) {
+                selPanel.style.display = 'flex';
+                selPanel.style.flexDirection = 'column';
+                inpSelRadius.value = particle.radius;
+                valSelRadius.textContent = Math.round(particle.radius);
+                inpSelColor.value = rgbToHex(particle.rgb.r, particle.rgb.g, particle.rgb.b);
+            } else {
+                selPanel.style.display = 'none';
+            }
+        };
+
+        inpSelRadius.addEventListener('input', (e) => {
+            if (app.selectedParticle) {
+                app.selectedParticle.radius = parseFloat(e.target.value);
+                valSelRadius.textContent = Math.round(app.selectedParticle.radius);
+            }
+        });
+
+        inpSelColor.addEventListener('input', (e) => {
+            if (app.selectedParticle) {
+                app.selectedParticle.rgb = hexToRgb(e.target.value);
+            }
+        });
+
+        // 배열 순서(Z-Index) 조절 이벤트
+        document.getElementById('btn-bring-front').addEventListener('click', () => {
+            if (app.selectedParticle) {
+                const index = app.particles.indexOf(app.selectedParticle);
+                if (index > -1 && index < app.particles.length - 1) {
+                    app.particles.splice(index, 1);
+                    app.particles.push(app.selectedParticle);
+                }
+            }
+        });
+
+        document.getElementById('btn-send-back').addEventListener('click', () => {
+            if (app.selectedParticle) {
+                const index = app.particles.indexOf(app.selectedParticle);
+                if (index > 0) {
+                    app.particles.splice(index, 1);
+                    app.particles.unshift(app.selectedParticle);
+                }
+            }
+        });
+
+        // 한 칸 앞으로 (바로 다음 인덱스와 스왑)
+        document.getElementById('btn-forward-one').addEventListener('click', () => {
+            if (app.selectedParticle) {
+                const index = app.particles.indexOf(app.selectedParticle);
+                if (index > -1 && index < app.particles.length - 1) {
+                    const temp = app.particles[index + 1];
+                    app.particles[index + 1] = app.particles[index];
+                    app.particles[index] = temp;
+                }
+            }
+        });
+
+        // 한 칸 뒤로 (바로 이전 인덱스와 스왑)
+        document.getElementById('btn-backward-one').addEventListener('click', () => {
+            if (app.selectedParticle) {
+                const index = app.particles.indexOf(app.selectedParticle);
+                if (index > 0) {
+                    const temp = app.particles[index - 1];
+                    app.particles[index - 1] = app.particles[index];
+                    app.particles[index] = temp;
+                }
+            }
+        });
+
+        document.getElementById('inp-editMode').addEventListener('change', (e) => {
+            config.isEditMode = e.target.checked;
+            app.canvas.style.cursor = config.isEditMode ? 'crosshair' : 'default';
+            if (!config.isEditMode) {
+                app.selectedParticle = null;
+                if(app.onSelectedChange) app.onSelectedChange(null);
+            }
+        });
+
+        document.getElementById('inp-blend').addEventListener('change', (e) => {
+            config.blendMode = e.target.value;
+        });
+
+        const colorsContainer = document.getElementById('colors-container');
+        config.colors.forEach((color, index) => {
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.value = color;
+            input.addEventListener('input', (e) => {
+                config.colors[index] = e.target.value;
+                app.createParticles();
+            });
+            colorsContainer.appendChild(input);
+        });
+    }
+
+    window.onload = () => {
+        const app = new App();
+        initControls(app);
+    }
 </script>
 
 </body>
 </html>
-
-
 
 
