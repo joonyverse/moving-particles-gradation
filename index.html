@@ -113,6 +113,10 @@
         <input type="range" id="inp-maxRadius" min="500" max="1500" value="900">
     </div>
     <div class="control-group">
+        <label>해상도 배율 <span id="val-resolution"></span></label>
+        <input type="range" id="inp-resolution" min="1" max="4" step="0.5" value="2">
+    </div>
+    <div class="control-group">
         <label>합성 모드 (Blend Mode)</label>
         <select id="inp-blend">
             <option value="saturation">Saturation (색상 강조)</option>
@@ -137,6 +141,7 @@
         speed: 1.0,
         minRadius: 400,
         maxRadius: 900,
+        resolution: window.devicePixelRatio ? Math.max(2, window.devicePixelRatio) : 2, // 기본적으로 기기 해상도에 맞추되 최소 2배율 적용
         blendMode: 'saturation',
         colors: ['#2d4ae3', '#faff59', '#ff68f8', '#2cd1fc', '#36e954']
     };
@@ -220,9 +225,6 @@
             document.body.appendChild(this.canvas);
             this.ctx = this.canvas.getContext('2d');
 
-            // 레티나 디스플레이 등을 위해 픽셀 비율 조정
-        this.pixelRatio = (window.devicePixelRatio > 1) ? 2 : 1;
-
         // 파티클(원) 배열
         this.particles = [];
 
@@ -238,6 +240,9 @@
         // 화면 크기 가져오기
         this.stageWidth = document.body.clientWidth;
         this.stageHeight = document.body.clientHeight;
+
+        // 해상도 배율 설정 적용
+        this.pixelRatio = config.resolution;
 
         // 캔버스 크기를 화면 크기에 맞추고 픽셀 비율 적용
         this.canvas.width = this.stageWidth * this.pixelRatio;
@@ -328,6 +333,15 @@ function initControls(app) {
         app.createParticles();
     });
 
+    // 해상도 컨트롤 바인딩
+    document.getElementById('val-resolution').textContent = config.resolution.toFixed(1);
+    document.getElementById('inp-resolution').value = config.resolution;
+    document.getElementById('inp-resolution').addEventListener('input', (e) => {
+        config.resolution = parseFloat(e.target.value);
+        document.getElementById('val-resolution').textContent = config.resolution.toFixed(1);
+        app.resize(); // 해상도가 변경되면 캔버스를 다시 리사이즈하여 화질 즉시 적용
+    });
+
     document.getElementById('inp-blend').addEventListener('change', (e) => {
         config.blendMode = e.target.value;
     });
@@ -355,5 +369,6 @@ window.onload = () => {
 
 </body>
 </html>
+
 
 
