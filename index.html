@@ -127,18 +127,15 @@
     <div class="control-group save-slot-box">
         <label style="color: #2d4ae3; margin-bottom: 5px;">💾 저장 슬롯 관리</label>
         
-        <!-- 새 이름으로 저장 -->
         <div style="display: flex; gap: 5px; margin-bottom: 8px;">
             <input type="text" id="inp-save-name" class="save-input" placeholder="새로운 테마 이름">
             <button id="btn-save-new" class="action-btn" style="width: auto; background: #2d4ae3; color: #fff; border-color: #2d4ae3;">새로 저장</button>
         </div>
         
-        <!-- 저장 목록 -->
         <select id="sel-save-list">
             <option value="">저장된 테마가 없습니다</option>
         </select>
         
-        <!-- 선택된 슬롯 조작 버튼 -->
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 5px;">
             <button id="btn-load-save" class="action-btn">📂 불러오기</button>
             <button id="btn-update-save" class="action-btn">🔄 덮어쓰기</button>
@@ -248,7 +245,7 @@
     };
 
     let config = JSON.parse(JSON.stringify(defaultConfig));
-    const SAVES_KEY = 'gradientBackgroundMultiSaves'; // 다중 저장소 키
+    const SAVES_KEY = 'gradientBackgroundMultiSaves';
 
     function hexToRgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -260,10 +257,12 @@
     const PI2 = Math.PI * 2;
 
     class GlowParticle {
-        constructor(x, y, radius, rgb, vx = null, vy = null) {
+        // 💡 isCustomColor 플래그 추가 (개별 수정 여부 추적)
+        constructor(x, y, radius, rgb, vx = null, vy = null, isCustomColor = false) {
             this.x = x; this.y = y; this.radius = radius; this.rgb = rgb;
             this.vx = vx !== null ? vx : (Math.random() * 4 * (Math.random() > 0.5 ? 1 : -1));
             this.vy = vy !== null ? vy : (Math.random() * 4 * (Math.random() > 0.5 ? 1 : -1));
+            this.isCustomColor = isCustomColor;
         }
         animate(ctx, stageWidth, stageHeight, isSelected = false) {
             if (!config.isEditMode) {
@@ -307,7 +306,6 @@
             this.particles = [];
             window.addEventListener('resize', this.resize.bind(this), false);
             
-            // 초기 실행 시 목록 중 마지막에 작업한 데이터를 불러오거나 기본값 적용
             this.loadInitialData();
             
             this.resize();
@@ -318,22 +316,19 @@
             const saves = JSON.parse(localStorage.getItem(SAVES_KEY) || '{}');
             const keys = Object.keys(saves);
             if (keys.length > 0) {
-                // 저장된 목록이 있으면 가장 첫 번째(또는 원하는 로직) 항목 로드
                 const lastSave = saves[keys[keys.length - 1]];
                 this.applySaveData(lastSave);
             }
         }
 
-        // 특정 저장 데이터를 앱에 적용하는 함수
         applySaveData(parsedData) {
             config = { ...defaultConfig, ...parsedData.config };
             if (parsedData.particlesData && parsedData.particlesData.length > 0) {
-                this.particles = parsedData.particlesData.map(p => new GlowParticle(p.x, p.y, p.radius, p.rgb, p.vx, p.vy));
-                this.hasLoadedParticles = true;
+                this.particles = parsedData.particlesData.map(p => new GlowParticle(p.x, p.y, p.radius, p.rgb, p.vx, p.vy, p.isCustomColor));
             } else {
-                this.createParticles();
+                this.particles = [];
             }
-            if(this.onDataLoaded) this.onDataLoaded(); // UI 업데이트 트리거
+            if(this.onDataLoaded) this.onDataLoaded();
         }
 
         resize() {
@@ -341,8 +336,48 @@
             this.pixelRatio = config.resolution;
             this.canvas.width = this.stageWidth * this.pixelRatio; this.canvas.height = this.stageHeight * this.pixelRatio;
             this.ctx.scale(this.pixelRatio, this.pixelRatio);
-            if (!this.hasLoadedParticles) this.createParticles();
-            else this.hasLoadedParticles = false;
+            
+            // 💡 창 크기 변경 시 위치를 초기화(Reset) 하지 않고 개수만 맞추도록 안전한 동기화 사용
+            this.syncParticlesCount();
+        }
+
+        // 💡 파티클 초기화 방지 로직: 개수 슬라이더 조절 시 사용
+        syncParticlesCount() {
+            // 개수가 줄어들면 뒤에서부터 제거
+            while (this.particles.length > config.particles) {
+                this.particles.pop();
+            }
+            // 개수가 늘어나면 추가 생성 (기존 파티클 유지)
+            let curColor = this.particles.length % config.colors.length;
+            while (this.particles.length < config.particles) {
+                this.particles.push(new GlowParticle(
+                    Math.random() * this.stageWidth, Math.random() * this.stageHeight,
+                    Math.random() * (config.maxRadius - config.minRadius) + config.minRadius,
+                    hexToRgb(config.colors[curColor])
+                ));
+                if (++curColor >= config.colors.length) curColor = 0;
+            }
+        }
+
+        // 💡 팔레트 초기화 방지 로직: 팔레트 색상 조절 시 위치/크기 보존
+        syncPaletteColors() {
+            let curColor = 0;
+            for (let i = 0; i < this.particles.length; i++) {
+                // 개별 색상으로 지정된 파티클은 덮어쓰지 않고 보호!
+                if (!this.particles[i].isCustomColor) {
+                    this.particles[i].rgb = hexToRgb(config.colors[curColor]);
+                }
+                if (++curColor >= config.colors.length) curColor = 0;
+            }
+            if(this.onSelectedChange) this.onSelectedChange(this.selectedParticle);
+        }
+
+        // 💡 크기 보정 로직
+        syncRadius() {
+            for (let i = 0; i < this.particles.length; i++) {
+                if (this.particles[i].radius < config.minRadius) this.particles[i].radius = config.minRadius;
+                if (this.particles[i].radius > config.maxRadius) this.particles[i].radius = config.maxRadius;
+            }
         }
 
         getPointerPos(e) {
@@ -402,23 +437,11 @@
             this.canvas.style.cursor = config.isEditMode ? 'crosshair' : 'default';
         }
 
-        createParticles() {
-            let curColor = 0; this.particles = [];
-            for (let i = 0; i < config.particles; i++) {
-                this.particles[i] = new GlowParticle(
-                    Math.random() * this.stageWidth, Math.random() * this.stageHeight,
-                    Math.random() * (config.maxRadius - config.minRadius) + config.minRadius,
-                    hexToRgb(config.colors[curColor])
-                );
-                if (++curColor >= config.colors.length) curColor = 0;
-            }
-        }
-
         animate() {
             window.requestAnimationFrame(this.animate.bind(this));
             this.ctx.clearRect(0, 0, this.stageWidth, this.stageHeight);
             this.ctx.globalCompositeOperation = config.blendMode;
-            for (let i = 0; i < config.particles; i++) {
+            for (let i = 0; i < this.particles.length; i++) {
                 if(this.particles[i]) this.particles[i].animate(this.ctx, this.stageWidth, this.stageHeight, this.particles[i] === this.selectedParticle);
             }
         }
@@ -432,12 +455,10 @@
         const selSaveList = document.getElementById('sel-save-list');
         const inpSaveName = document.getElementById('inp-save-name');
         
-        // 로컬스토리지에서 전체 목록 가져오기
         function getSaves() {
             return JSON.parse(localStorage.getItem(SAVES_KEY) || '{}');
         }
         
-        // 목록 UI 업데이트
         function renderSaveList() {
             const saves = getSaves();
             selSaveList.innerHTML = '';
@@ -457,35 +478,30 @@
                 opt.textContent = saves[id].name;
                 selSaveList.appendChild(opt);
             });
-            // 방금 추가/수정한 것을 선택 상태로 두기 위해 (마지막 요소 선택)
             selSaveList.selectedIndex = keys.length - 1;
         }
 
-        // 현재 상태를 객체로 추출
         function getCurrentSaveData(name) {
             return {
                 name: name,
                 config: config,
-                particlesData: app.particles.map(p => ({ x: p.x, y: p.y, radius: p.radius, rgb: p.rgb, vx: p.vx, vy: p.vy }))
+                particlesData: app.particles.map(p => ({ x: p.x, y: p.y, radius: p.radius, rgb: p.rgb, vx: p.vx, vy: p.vy, isCustomColor: p.isCustomColor }))
             };
         }
 
-        // [새로 저장] 버튼
         document.getElementById('btn-save-new').addEventListener('click', () => {
             const name = inpSaveName.value.trim() || `테마 ${new Date().toLocaleTimeString()}`;
-            const id = 'save_' + Date.now(); // 고유 ID 생성
-            
+            const id = 'save_' + Date.now();
             const saves = getSaves();
             saves[id] = getCurrentSaveData(name);
             localStorage.setItem(SAVES_KEY, JSON.stringify(saves));
             
-            inpSaveName.value = ''; // 입력창 초기화
+            inpSaveName.value = '';
             renderSaveList();
-            selSaveList.value = id; // 방금 만든 것으로 선택 변경
+            selSaveList.value = id;
             alert(`"${name}" (으)로 새롭게 저장되었습니다!`);
         });
 
-        // [덮어쓰기 (수정)] 버튼
         document.getElementById('btn-update-save').addEventListener('click', () => {
             const id = selSaveList.value;
             if (!id) return alert("덮어쓸 대상을 목록에서 선택해주세요.");
@@ -500,11 +516,9 @@
             }
         });
 
-        // [불러오기] 버튼
         document.getElementById('btn-load-save').addEventListener('click', () => {
             const id = selSaveList.value;
             if (!id) return alert("불러올 테마를 선택해주세요.");
-            
             const saves = getSaves();
             if(saves[id]) {
                 app.applySaveData(saves[id]);
@@ -512,11 +526,9 @@
             }
         });
 
-        // [삭제] 버튼
         document.getElementById('btn-delete-save').addEventListener('click', () => {
             const id = selSaveList.value;
             if (!id) return alert("삭제할 대상을 선택해주세요.");
-            
             const saves = getSaves();
             const existingName = saves[id].name;
             
@@ -527,12 +539,8 @@
             }
         });
 
-        // 최초 실행 시 목록 그리기
         renderSaveList();
 
-        // ==========================================
-        // 🔄 UI 동기화 (불러오기 했을 때 슬라이더 값 등 일치시키기)
-        // ==========================================
         const updateAllUIInputs = () => {
             document.getElementById('inp-particles').value = config.particles; 
             document.getElementById('val-particles').textContent = config.particles;
@@ -551,7 +559,6 @@
             renderColorPalette();
         };
 
-        // App에서 데이터를 불러왔을 때 호출될 콜백 등록
         app.onDataLoaded = () => {
             updateAllUIInputs();
             app.canvas.style.cursor = config.isEditMode ? 'crosshair' : 'default';
@@ -618,9 +625,6 @@
         imageContainer.addEventListener('mousedown', startImageDrag); window.addEventListener('mousemove', doImageDrag); window.addEventListener('mouseup', endImageDrag);
         imageContainer.addEventListener('touchstart', startImageDrag, {passive: false}); window.addEventListener('touchmove', doImageDrag, {passive: false}); window.addEventListener('touchend', endImageDrag);
 
-        // 초기 UI 강제 1회 세팅
-        updateAllUIInputs();
-
         // --- 기타 기본 컨트롤 연동 ---
         const toggleBtn = document.getElementById('toggle-btn');
         const controlsPanel = document.getElementById('controls');
@@ -629,11 +633,34 @@
             toggleBtn.textContent = controlsPanel.classList.contains('hidden') ? '⚙️ 설정 열기' : '⚙️ 설정 숨기기';
         });
 
-        document.getElementById('inp-particles').addEventListener('input', (e) => { config.particles = parseInt(e.target.value); document.getElementById('val-particles').textContent = config.particles; app.createParticles(); });
-        document.getElementById('inp-speed').addEventListener('input', (e) => { config.speed = parseFloat(e.target.value); document.getElementById('val-speed').textContent = config.speed.toFixed(1); });
-        document.getElementById('inp-minRadius').addEventListener('input', (e) => { config.minRadius = parseInt(e.target.value); document.getElementById('val-minRadius').textContent = config.minRadius; if(config.minRadius > config.maxRadius) { config.maxRadius = config.minRadius; document.getElementById('inp-maxRadius').value = config.maxRadius; document.getElementById('val-maxRadius').textContent = config.maxRadius; } app.createParticles(); });
-        document.getElementById('inp-maxRadius').addEventListener('input', (e) => { config.maxRadius = parseInt(e.target.value); document.getElementById('val-maxRadius').textContent = config.maxRadius; if(config.maxRadius < config.minRadius) { config.minRadius = config.maxRadius; document.getElementById('inp-minRadius').value = config.minRadius; document.getElementById('val-minRadius').textContent = config.minRadius; } app.createParticles(); });
-        document.getElementById('inp-resolution').addEventListener('input', (e) => { config.resolution = parseFloat(e.target.value); document.getElementById('val-resolution').textContent = config.resolution.toFixed(1); app.resize(); });
+        // 💡 파티클 재생성(createParticles) 대신 동기화(sync) 함수들 사용!
+        document.getElementById('inp-particles').addEventListener('input', (e) => { 
+            config.particles = parseInt(e.target.value); 
+            document.getElementById('val-particles').textContent = config.particles; 
+            app.syncParticlesCount(); 
+        });
+        
+        document.getElementById('inp-speed').addEventListener('input', (e) => { 
+            config.speed = parseFloat(e.target.value); 
+            document.getElementById('val-speed').textContent = config.speed.toFixed(1); 
+        });
+        
+        document.getElementById('inp-minRadius').addEventListener('input', (e) => { 
+            config.minRadius = parseInt(e.target.value); document.getElementById('val-minRadius').textContent = config.minRadius; 
+            if(config.minRadius > config.maxRadius) { config.maxRadius = config.minRadius; document.getElementById('inp-maxRadius').value = config.maxRadius; document.getElementById('val-maxRadius').textContent = config.maxRadius; } 
+            app.syncRadius(); 
+        });
+        
+        document.getElementById('inp-maxRadius').addEventListener('input', (e) => { 
+            config.maxRadius = parseInt(e.target.value); document.getElementById('val-maxRadius').textContent = config.maxRadius; 
+            if(config.maxRadius < config.minRadius) { config.minRadius = config.maxRadius; document.getElementById('inp-minRadius').value = config.minRadius; document.getElementById('val-minRadius').textContent = config.minRadius; } 
+            app.syncRadius(); 
+        });
+        
+        document.getElementById('inp-resolution').addEventListener('input', (e) => { 
+            config.resolution = parseFloat(e.target.value); document.getElementById('val-resolution').textContent = config.resolution.toFixed(1); 
+            app.resize(); 
+        });
 
         const selPanel = document.getElementById('selected-panel');
         const inpSelRadius = document.getElementById('inp-sel-radius');
@@ -649,7 +676,15 @@
         };
 
         inpSelRadius.addEventListener('input', (e) => { if (app.selectedParticle) { app.selectedParticle.radius = parseFloat(e.target.value); valSelRadius.textContent = Math.round(app.selectedParticle.radius); } });
-        inpSelColor.addEventListener('input', (e) => { if (app.selectedParticle) { app.selectedParticle.rgb = hexToRgb(e.target.value); } });
+        
+        // 💡 개별 색상 변경 시 isCustomColor 플래그를 true로 켬
+        inpSelColor.addEventListener('input', (e) => { 
+            if (app.selectedParticle) { 
+                app.selectedParticle.rgb = hexToRgb(e.target.value); 
+                app.selectedParticle.isCustomColor = true;
+            } 
+        });
+        
         document.getElementById('btn-bring-front').addEventListener('click', () => { if (app.selectedParticle) { const idx = app.particles.indexOf(app.selectedParticle); if (idx > -1 && idx < app.particles.length - 1) { app.particles.splice(idx, 1); app.particles.push(app.selectedParticle); } } });
         document.getElementById('btn-send-back').addEventListener('click', () => { if (app.selectedParticle) { const idx = app.particles.indexOf(app.selectedParticle); if (idx > 0) { app.particles.splice(idx, 1); app.particles.unshift(app.selectedParticle); } } });
         document.getElementById('btn-forward-one').addEventListener('click', () => { if (app.selectedParticle) { const idx = app.particles.indexOf(app.selectedParticle); if (idx > -1 && idx < app.particles.length - 1) { const temp = app.particles[idx + 1]; app.particles[idx + 1] = app.particles[idx]; app.particles[idx] = temp; } } });
@@ -669,14 +704,32 @@
             config.colors.forEach((color, index) => {
                 const input = document.createElement('input');
                 input.type = 'color'; input.value = color;
-                input.addEventListener('input', (e) => { config.colors[index] = e.target.value; app.createParticles(); });
+                input.addEventListener('input', (e) => { 
+                    config.colors[index] = e.target.value; 
+                    app.syncPaletteColors(); // 💡 재생성 대신 동기화
+                });
                 colorsContainer.appendChild(input);
             });
         }
 
-        renderColorPalette();
-        document.getElementById('btn-add-color').addEventListener('click', () => { config.colors.push('#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')); renderColorPalette(); app.createParticles(); });
-        document.getElementById('btn-remove-color').addEventListener('click', () => { if (config.colors.length > 1) { config.colors.pop(); renderColorPalette(); app.createParticles(); } else { alert('최소 1개의 색상은 필요합니다.'); } });
+        document.getElementById('btn-add-color').addEventListener('click', () => { 
+            config.colors.push('#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')); 
+            renderColorPalette(); 
+            app.syncPaletteColors(); // 💡 위치 유지하며 색상만 덮어쓰기
+        });
+        
+        document.getElementById('btn-remove-color').addEventListener('click', () => { 
+            if (config.colors.length > 1) { 
+                config.colors.pop(); 
+                renderColorPalette(); 
+                app.syncPaletteColors(); 
+            } else { 
+                alert('최소 1개의 색상은 필요합니다.'); 
+            } 
+        });
+
+        // 💡 모든 DOM 요소가 선언된 후 마지막에 UI 초기화 실행하여 에러 방지
+        updateAllUIInputs();
     }
 
     window.onload = () => { const app = new App(); initControls(app); }
