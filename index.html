@@ -119,6 +119,7 @@
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
+            margin-top: 5px;
         }
 
         input[type="color"] {
@@ -150,6 +151,18 @@
         }
         .action-btn:hover {
             background: #f0f0f0;
+        }
+
+        .icon-btn {
+            padding: 2px 8px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .icon-btn:hover {
+            background: #eee;
         }
     </style>
 </head>
@@ -193,7 +206,13 @@
         </select>
     </div>
     <div class="control-group">
-        <label>전체 색상 팔레트</label>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label style="margin: 0;">전체 색상 팔레트</label>
+            <div>
+                <button id="btn-add-color" class="icon-btn" title="색상 추가">+</button>
+                <button id="btn-remove-color" class="icon-btn" title="마지막 색상 삭제">-</button>
+            </div>
+        </div>
         <div class="colors-container" id="colors-container">
             <!-- JS에서 동적 생성 -->
         </div>
@@ -464,6 +483,7 @@
             let curColor = 0;
             this.particles = [];
             for (let i = 0; i < config.particles; i++) {
+                // 저장된 색상 팔레트 개수 안에서 순환하며 파티클 생성
                 const colorRgb = hexToRgb(config.colors[curColor]);
                 const item = new GlowParticle(
                     Math.random() * this.stageWidth,
@@ -596,7 +616,6 @@
             }
         });
 
-        // 한 칸 앞으로 (바로 다음 인덱스와 스왑)
         document.getElementById('btn-forward-one').addEventListener('click', () => {
             if (app.selectedParticle) {
                 const index = app.particles.indexOf(app.selectedParticle);
@@ -608,7 +627,6 @@
             }
         });
 
-        // 한 칸 뒤로 (바로 이전 인덱스와 스왑)
         document.getElementById('btn-backward-one').addEventListener('click', () => {
             if (app.selectedParticle) {
                 const index = app.particles.indexOf(app.selectedParticle);
@@ -633,16 +651,43 @@
             config.blendMode = e.target.value;
         });
 
+        // 팔레트 렌더링 함수
         const colorsContainer = document.getElementById('colors-container');
-        config.colors.forEach((color, index) => {
-            const input = document.createElement('input');
-            input.type = 'color';
-            input.value = color;
-            input.addEventListener('input', (e) => {
-                config.colors[index] = e.target.value;
-                app.createParticles();
+        function renderColorPalette() {
+            colorsContainer.innerHTML = ''; // 초기화
+            config.colors.forEach((color, index) => {
+                const input = document.createElement('input');
+                input.type = 'color';
+                input.value = color;
+                input.addEventListener('input', (e) => {
+                    config.colors[index] = e.target.value;
+                    app.createParticles(); // 색상 변경 시 즉시 반영
+                });
+                colorsContainer.appendChild(input);
             });
-            colorsContainer.appendChild(input);
+        }
+
+        // 초기 팔레트 렌더링
+        renderColorPalette();
+
+        // 색상 추가 버튼 (+)
+        document.getElementById('btn-add-color').addEventListener('click', () => {
+            // 랜덤한 HEX 색상 생성
+            const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+            config.colors.push(randomColor);
+            renderColorPalette();
+            app.createParticles();
+        });
+
+        // 색상 삭제 버튼 (-)
+        document.getElementById('btn-remove-color').addEventListener('click', () => {
+            if (config.colors.length > 1) { // 최소 1개의 색상은 유지
+                config.colors.pop();
+                renderColorPalette();
+                app.createParticles();
+            } else {
+                alert('최소 1개의 색상은 필요합니다.');
+            }
         });
     }
 
